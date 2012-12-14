@@ -1,0 +1,4 @@
+{
+    "main": "net.atarno.vertx.memcached.MemClient",
+    "worker": true
+}
