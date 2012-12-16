@@ -26,6 +26,10 @@ import org.vertx.java.core.json.JsonArray;
 import org.vertx.java.core.json.JsonObject;
 
 import java.io.IOException;
+import java.util.ArrayList;
+import java.util.Arrays;
+import java.util.List;
+import java.util.Map;
 import java.util.concurrent.ExecutionException;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.TimeoutException;
@@ -88,79 +92,123 @@ public class MemClient extends BusModBase implements Handler<Message<JsonObject>
          sendError(message, "\"command\" property is mandatory for request");
          return;
       }
+      JsonObject response = null;
+      
       //https://github.com/dustin/java-memcached-client/blob/master/src/main/java/net/spy/memcached/MemcachedClient.java
       try{
-         switch (command)
+         switch (command.toLowerCase())
          {
             case "set":
-               set(message);
+               response = set(message);
                break;
             case "get":
-               get(message);
+               response = get(message);
                break;
-   /*         case "getBulk":
-               getBulk(message);
+            case "getbulk":
+               response = getBulk(message);
                break;
-            case "status":
-               status(message);//server status,combine availableservers and unavailableservers
+   /*         case "status":
+               response = status(message);//server status,combine availableservers and unavailableservers
                break;
             case "touch":
-               touch(message);
+               response = touch(message);
                break;
             case "append":
-               append(message);
+               response = append(message);
                break;
             case "prepend":
-               prepend(message);
+               response = prepend(message);
                break;
             case "add":
-               add(message);
+               response = add(message);
                break;
             case "replace":
-               replace(message);
+               response = replace(message);
                break;
-            case "getAndTouch":
-               getAndTouch(message);
+            case "getandtouch":
+               response = getAndTouch(message);
                break;
-            case "getStats":
-               getStats(message);
+            case "getstats":
+               response = getStats(message);
                break;
             case "incr":
-               incr(message);
+               response = incr(message);
                break;
             case "decr":
-               decr(message);
+               response = decr(message);
                break;
             case "delete":
-               delete(message);
+               response = delete(message);
                break;
             case "flush":
-               flush(message);
+               response = flush(message);
                break;
    */       default:
-               sendError(message, "Unknown command: '" + command + "'");
+               sendError(message, "unknown command: '" + command + "'");
+         }
+         if(response != null)
+         {
+            JsonObject sendBack = new JsonObject();
+            sendBack.putObject("response", response);
+            sendOK(message, sendBack);
          }
       }
       catch (InterruptedException e) {
-         sendError(message, "Failed to complete the operation within " + operationTimeOut + " " + timeUnit + ".");
+         sendError(message, "failed to complete the operation within " + operationTimeOut + " " + timeUnit);
       }
       catch (ExecutionException e) {
-         sendError(message, "Operation failed.");
+         sendError(message, "operation failed");
       }
       catch (TimeoutException e) {
-         sendError(message, "Failed to complete the operation within " + operationTimeOut + " " + timeUnit + ".");
+         sendError(message, "failed to complete the operation within " + operationTimeOut + " " + timeUnit );
       }
       catch (Exception e) {
          sendError(message, e.getMessage());
       }
    }
 
-   private void set(Message<JsonObject> message) throws Exception
+   @SuppressWarnings("unchecked")
+   private JsonObject getBulk(Message<JsonObject> message) throws Exception
+   {
+      JsonArray keys = message.body.getArray("keys");
+      if(keys == null || keys.size() == 0)
+      {
+         sendError(message, "missing mandatory non-empty field 'keys'");
+         return null;
+      }
+
+      List<String> keysList = new ArrayList<String>();
+      for(Object o : keys.toArray())
+      {
+         keysList.add((String) o);
+      }
+
+      Map<String, Object> result = memClient.asyncGetBulk(keysList).get(operationTimeOut, timeUnit);
+
+      JsonObject response = new JsonObject();
+      for(String k : keysList)
+      {
+         Object value = result.get(k);
+         try
+         {
+            response = parseForJson(response, k, value);
+         }
+         catch (Exception e)
+         {
+            sendError(message, e.getMessage());
+            return null;
+         }
+      }
+      return response;
+   }
+
+   private JsonObject set(Message<JsonObject> message) throws Exception
    {
       String key = voidNull(getMandatoryString("key", message));
       if(key.isEmpty())
       {
-         return;
+         sendError(message, "missing mandatory non-empty field 'key'");
+         return null;
       }
       Object value = message.body.getField("value");
       int ttl = message.body.getInteger("ttl") == null ? 0 : message.body.getInteger("ttl");
@@ -169,36 +217,37 @@ public class MemClient extends BusModBase implements Handler<Message<JsonObject>
 
       if(!success)
       {
-         sendError(message, "Operation failed.");
-         return;
+         sendError(message, "operation failed");
+         return null;
       }
       JsonObject response = new JsonObject();
-      sendOK(message, response);
+      return response;
    }
 
-   private void get(Message<JsonObject> message) throws Exception
+   private JsonObject get(Message<JsonObject> message) throws Exception
    {
       String key = voidNull(getMandatoryString("key", message));
       if(key.isEmpty())
       {
-         return;
+         sendError(message, "missing mandatory non-empty field 'key'");
+         return null;
       }
        
       Object value = memClient.asyncGet(key).get(operationTimeOut, timeUnit);
       JsonObject response = new JsonObject();
       try
       {
-         response = put(response, value);
+         response = parseForJson(response, "key", value);
       } 
       catch (Exception e)
       {
          sendError(message, e.getMessage());
-         return;   
+         return null;   
       }
-      sendOK(message, response);
+      return response;
    }
 
-   private JsonObject put(JsonObject jsonObject, Object value) throws Exception
+   private JsonObject parseForJson(JsonObject jsonObject, String key, Object value) throws Exception
    {
       if(value != null)
       {
@@ -212,15 +261,15 @@ public class MemClient extends BusModBase implements Handler<Message<JsonObject>
    */
 
          if(value instanceof byte[])
-            jsonObject.putBinary("value", (byte[]) value);
+            jsonObject.putBinary(key, (byte[]) value);
          else if(value instanceof Boolean)
-            jsonObject.putBoolean("value", (Boolean) value);
+            jsonObject.putBoolean(key, (Boolean) value);
          else if(value instanceof Number)
-            jsonObject.putNumber("value", (Number) value);
+            jsonObject.putNumber(key, (Number) value);
          else if(value instanceof String)
-            jsonObject.putString("value", (String) value);
+            jsonObject.putString(key, (String) value);
          else
-            throw new Exception("Unsupported object type");
+            throw new Exception("unsupported object type");
       }
       return jsonObject;
    }
