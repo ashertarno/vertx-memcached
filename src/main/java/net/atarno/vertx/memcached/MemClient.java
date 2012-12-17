@@ -26,8 +26,11 @@ import org.vertx.java.core.json.JsonArray;
 import org.vertx.java.core.json.JsonObject;
 
 import java.io.IOException;
+import java.net.InetSocketAddress;
+import java.net.SocketAddress;
 import java.util.ArrayList;
 import java.util.Arrays;
+import java.util.Collection;
 import java.util.List;
 import java.util.Map;
 import java.util.concurrent.ExecutionException;
@@ -107,8 +110,8 @@ public class MemClient extends BusModBase implements Handler<Message<JsonObject>
             case "getbulk":
                response = getBulk(message);
                break;
-   /*         case "status":
-               response = status(message);//server status,combine availableservers and unavailableservers
+            case "status":
+               response = status(message);
                break;
             case "touch":
                response = touch(message);
@@ -125,7 +128,7 @@ public class MemClient extends BusModBase implements Handler<Message<JsonObject>
             case "replace":
                response = replace(message);
                break;
-            case "getandtouch":
+   /*         case "getandtouch":
                response = getAndTouch(message);
                break;
             case "getstats":
@@ -167,6 +170,170 @@ public class MemClient extends BusModBase implements Handler<Message<JsonObject>
       }
    }
 
+   private JsonObject replace(Message<JsonObject> message) throws Exception
+   {
+      String key = voidNull(getMandatoryString("key", message));
+      if(key.isEmpty())
+      {
+         sendError(message, "missing mandatory non-empty field 'key'");
+         return null;
+      }
+      int exp = message.body.getInteger("exp") == null ? 0 : message.body.getInteger("exp");
+      Object value = message.body.getField("value");
+
+      boolean success = memClient.replace(key, exp, value).get(operationTimeOut, timeUnit);
+
+      JsonObject response = new JsonObject();
+      JsonObject data = new JsonObject();
+      response.putObject("data", data);
+      response.putBoolean("success", success);
+      if(!success)
+      {
+         response.putString("reason", "failed to fetch key '" + key +"'");
+      }
+
+      return response;
+   }
+
+   private JsonObject add(Message<JsonObject> message) throws Exception
+   {
+      String key = voidNull(getMandatoryString("key", message));
+      if(key.isEmpty())
+      {
+         sendError(message, "missing mandatory non-empty field 'key'");
+         return null;
+      }
+      int exp = message.body.getInteger("exp") == null ? 0 : message.body.getInteger("exp");
+      Object value = message.body.getField("value");
+
+      boolean success = memClient.add(key, exp, value).get(operationTimeOut, timeUnit);
+
+      JsonObject response = new JsonObject();
+      JsonObject data = new JsonObject();
+      response.putObject("data", data);
+      response.putBoolean("success", success);
+      if(!success)
+      {
+         response.putString("reason", "failed to fetch key '" + key +"'");
+      }
+
+      return response;
+   }
+
+   private JsonObject prepend(Message<JsonObject> message) throws Exception
+   {
+      String key = voidNull(getMandatoryString("key", message));
+      if(key.isEmpty())
+      {
+         sendError(message, "missing mandatory non-empty field 'key'");
+         return null;
+      }
+      Long cas = message.body.getLong("cas");
+      if(cas == null)
+      {
+         sendError(message, "missing mandatory non-empty field 'cas'");
+         return null;
+      }
+      Object value = message.body.getField("value");
+
+      boolean success = memClient.prepend(cas, key, value).get(operationTimeOut, timeUnit);
+
+      JsonObject response = new JsonObject();
+      JsonObject data = new JsonObject();
+      response.putObject("data", data);
+      response.putBoolean("success", success);
+      if(!success)
+      {
+         response.putString("reason", "failed to fetch key '" + key +"'");
+      }
+
+      return response;
+   }
+
+   private JsonObject append(Message<JsonObject> message) throws Exception
+   {
+      String key = voidNull(getMandatoryString("key", message));
+      if(key.isEmpty())
+      {
+         sendError(message, "missing mandatory non-empty field 'key'");
+         return null;
+      }
+      Long cas = message.body.getLong("cas");
+      if(cas == null)
+      {
+         sendError(message, "missing mandatory non-empty field 'cas'");
+         return null;
+      }
+
+      Object value = message.body.getField("value");
+
+      boolean success = memClient.append(cas, key, value).get(operationTimeOut, timeUnit);
+
+      JsonObject response = new JsonObject();
+      JsonObject data = new JsonObject();
+      response.putObject("data", data);
+      response.putBoolean("success", success);
+      if(!success)
+      {
+         response.putString("reason", "failed to fetch key '" + key +"'");
+      }
+
+      return response;
+   }
+
+   //there is a known issue with touch in current memcached version 1.4.5_4_gaa7839e.
+   //should work once fixed though.
+   private JsonObject touch(Message<JsonObject> message) throws Exception
+   {
+      String key = voidNull(getMandatoryString("key", message));
+      if(key.isEmpty())
+      {
+         sendError(message, "missing mandatory non-empty field 'key'");
+         return null;
+      }
+      Integer exp = message.body.getInteger("exp");
+      if(exp == null)
+      {
+         sendError(message, "missing mandatory non-empty field 'exp'");
+         return null;
+      }
+      boolean success = memClient.touch(key, exp.intValue()).get(operationTimeOut, timeUnit);
+
+      JsonObject response = new JsonObject();
+      JsonObject data = new JsonObject();
+      response.putObject("data", data);
+      response.putBoolean("success", success);
+      if(!success)
+      {
+         response.putString("reason", "failed to fetch key '" + key +"'");
+      }
+
+      return response;
+   }
+
+   private JsonObject status(Message<JsonObject> message) throws Exception
+   {
+      Collection<SocketAddress> available = memClient.getAvailableServers();
+      Collection<SocketAddress> unavailable = memClient.getUnavailableServers();
+      JsonArray aArr = new JsonArray();
+      for(SocketAddress sa : available)
+      {
+         aArr.addString(((InetSocketAddress)sa).getHostString() + ":" + ((InetSocketAddress)sa).getPort());
+      }
+      JsonArray uArr = new JsonArray();
+      for(SocketAddress sa : unavailable)
+      {
+         uArr.addString(((InetSocketAddress)sa).getHostString() + ":" + ((InetSocketAddress)sa).getPort());
+      }
+      JsonObject response = new JsonObject();
+      JsonObject data = new JsonObject();
+      response.putObject("data", data);
+      response.putBoolean("success", true);
+      data.putArray("available", aArr);
+      data.putArray("unavailable", uArr);
+      return response;
+   }
+
    @SuppressWarnings("unchecked")
    private JsonObject getBulk(Message<JsonObject> message) throws Exception
    {
@@ -186,12 +353,14 @@ public class MemClient extends BusModBase implements Handler<Message<JsonObject>
       Map<String, Object> result = memClient.asyncGetBulk(keysList).get(operationTimeOut, timeUnit);
 
       JsonObject response = new JsonObject();
+      JsonObject data = new JsonObject();
+      response.putObject("data", data);
       for(String k : keysList)
       {
          Object value = result.get(k);
          try
          {
-            response = parseForJson(response, k, value);
+            data = parseForJson(data, k, value);
          }
          catch (Exception e)
          {
@@ -199,6 +368,8 @@ public class MemClient extends BusModBase implements Handler<Message<JsonObject>
             return null;
          }
       }
+      response.putBoolean("success", true);
+
       return response;
    }
 
@@ -211,16 +382,19 @@ public class MemClient extends BusModBase implements Handler<Message<JsonObject>
          return null;
       }
       Object value = message.body.getField("value");
-      int ttl = message.body.getInteger("ttl") == null ? 0 : message.body.getInteger("ttl");
+      int exp = message.body.getInteger("exp") == null ? 0 : message.body.getInteger("exp");
 
-      boolean success = memClient.set(key, ttl, value).get(operationTimeOut, timeUnit);
+      boolean success = memClient.set(key, exp, value).get(operationTimeOut, timeUnit);
 
+      JsonObject response = new JsonObject();
+      JsonObject data = new JsonObject();
+      response.putObject("data", data);
+      response.putBoolean("success", success);
       if(!success)
       {
-         sendError(message, "operation failed");
-         return null;
+         response.putString("reason", "failed to fetch key '" + key +"'");
       }
-      JsonObject response = new JsonObject();
+
       return response;
    }
 
@@ -235,15 +409,19 @@ public class MemClient extends BusModBase implements Handler<Message<JsonObject>
        
       Object value = memClient.asyncGet(key).get(operationTimeOut, timeUnit);
       JsonObject response = new JsonObject();
+      JsonObject data = new JsonObject();
+      response.putObject("data", data);
       try
       {
-         response = parseForJson(response, "key", value);
+         data = parseForJson(data, "key", value);
       } 
       catch (Exception e)
       {
          sendError(message, e.getMessage());
          return null;   
       }
+      response.putBoolean("success", true);
+
       return response;
    }
 
