@@ -97,7 +97,6 @@ public class MemClient extends BusModBase implements Handler<Message<JsonObject>
       }
       JsonObject response = null;
       
-      //https://github.com/dustin/java-memcached-client/blob/master/src/main/java/net/spy/memcached/MemcachedClient.java
       try{
          switch (command.toLowerCase())
          {
