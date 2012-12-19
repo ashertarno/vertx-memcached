@@ -18,7 +18,8 @@ package net.atarno.vertx.memcached;
 
 import net.spy.memcached.AddrUtil;
 import net.spy.memcached.BinaryConnectionFactory;
-import net.spy.memcached.MemcachedClient; 
+import net.spy.memcached.CASValue;
+import net.spy.memcached.MemcachedClient;
 import org.vertx.java.busmods.BusModBase;
 import org.vertx.java.core.Handler;
 import org.vertx.java.core.eventbus.Message;
@@ -29,7 +30,6 @@ import java.io.IOException;
 import java.net.InetSocketAddress;
 import java.net.SocketAddress;
 import java.util.ArrayList;
-import java.util.Arrays;
 import java.util.Collection;
 import java.util.List;
 import java.util.Map;
@@ -61,7 +61,7 @@ public class MemClient extends BusModBase implements Handler<Message<JsonObject>
       super.start();
       address = getOptionalStringConfig("address", "vertx.memcached");
       memServers = getMandatoryStringConfig("memcached_servers");
-      operationTimeOut = getOptionalLongConfig("operation_timeout", 5000);
+      operationTimeOut = getOptionalLongConfig("operation_timeout", 10000L);
 
       timeUnit = TimeUnit.MILLISECONDS;
 
@@ -128,7 +128,7 @@ public class MemClient extends BusModBase implements Handler<Message<JsonObject>
             case "replace":
                response = replace(message);
                break;
-   /*         case "getandtouch":
+            case "gat":
                response = getAndTouch(message);
                break;
             case "getstats":
@@ -146,7 +146,7 @@ public class MemClient extends BusModBase implements Handler<Message<JsonObject>
             case "flush":
                response = flush(message);
                break;
-   */       default:
+            default:
                sendError(message, "unknown command: '" + command + "'");
          }
          if(response != null)
@@ -168,6 +168,182 @@ public class MemClient extends BusModBase implements Handler<Message<JsonObject>
       catch (Exception e) {
          sendError(message, e.getMessage());
       }
+   }
+
+   private JsonObject flush(Message<JsonObject> message) throws Exception
+   {
+      int delay = message.body.getInteger("delay") == null ? 0 : message.body.getInteger("delay");
+
+      boolean success = memClient.flush(delay).get(operationTimeOut, timeUnit);
+
+      JsonObject response = new JsonObject();
+      JsonObject data = new JsonObject();
+      response.putObject("data", data);
+      response.putBoolean("success", success);
+      return response;
+   }
+
+   private JsonObject delete(Message<JsonObject> message) throws Exception
+   {
+      String key = voidNull(getMandatoryString("key", message));
+      if(key.isEmpty())
+      {
+         sendError(message, "missing mandatory non-empty field 'key'");
+         return null;
+      }
+
+      boolean success = memClient.delete(key).get(operationTimeOut, timeUnit);
+
+      JsonObject response = new JsonObject();
+      JsonObject data = new JsonObject();
+      response.putObject("data", data);
+      response.putBoolean("success", success);
+      if(!success)
+      {
+         response.putString("reason", "failed to fetch key '" + key +"'");
+      }
+
+      return response;
+   }
+
+   private JsonObject decr(Message<JsonObject> message) throws Exception
+   {
+      String key = voidNull(getMandatoryString("key", message));
+      if(key.isEmpty())
+      {
+         sendError(message, "missing mandatory non-empty field 'key'");
+         return null;
+      }
+      Long by = message.body.getLong("by");
+      if(by == null)
+      {
+         sendError(message, "missing mandatory non-empty field 'by'");
+         return null;
+      }
+
+      Long decr_val = memClient.asyncDecr(key, by).get(operationTimeOut, timeUnit);
+
+      JsonObject response = new JsonObject();
+      JsonObject data = new JsonObject();
+      response.putObject("data", data);
+      if(decr_val != null)
+      {
+         response.putBoolean("success", true);
+         data.putNumber("new_value", decr_val);
+      }
+      else
+      {
+         response.putBoolean("success", false);
+         response.putString("reason", "failed to fetch key '" + key +"'");
+      }
+
+      return response;
+   }
+
+
+   private JsonObject incr(Message<JsonObject> message) throws Exception
+   {
+      String key = voidNull(getMandatoryString("key", message));
+      if(key.isEmpty())
+      {
+         sendError(message, "missing mandatory non-empty field 'key'");
+         return null;
+      }
+      Long by = message.body.getLong("by");
+      if(by == null)
+      {
+         sendError(message, "missing mandatory non-empty field 'by'");
+         return null;
+      }
+
+      Long incr_val = memClient.asyncIncr(key, by).get(operationTimeOut, timeUnit);
+
+      JsonObject response = new JsonObject();
+      JsonObject data = new JsonObject();
+      response.putObject("data", data);
+      if(incr_val != null)
+      {
+         response.putBoolean("success", true);
+         data.putNumber("new_value", incr_val);
+      }
+      else
+      {
+         response.putBoolean("success", false);
+         response.putString("reason", "failed to fetch key '" + key +"'");
+      }
+
+      return response;
+   }
+
+   private JsonObject getStats(Message<JsonObject> message) throws Exception
+   {
+      Map<SocketAddress, Map<String, String>> stats = memClient.getStats();
+      JsonObject response = new JsonObject();
+      JsonObject data = new JsonObject();
+      for(SocketAddress sa : stats.keySet())
+      {
+         JsonObject s = new JsonObject();
+         data.putObject("server", s);
+         s.putString("address", ((InetSocketAddress)sa).getHostString() + ":" + ((InetSocketAddress)sa).getPort());
+         Map<String, String> info = stats.get(sa);
+         for(String i : info.keySet())
+         {
+            s.putString(i, info.get(i));
+         }
+      }
+
+      response.putObject("data", data);
+      response.putBoolean("success", true);
+      return response;
+   }
+
+   //there seems to be an issue with touch in current memcached version 1.4.5_4_gaa7839e.
+   //should work once fixed though.
+   private JsonObject getAndTouch(Message<JsonObject> message) throws Exception
+   {
+      String key = voidNull(getMandatoryString("key", message));
+      if(key.isEmpty())
+      {
+         sendError(message, "missing mandatory non-empty field 'key'");
+         return null;
+      }
+      Integer exp = message.body.getInteger("exp");
+      if(exp == null)
+      {
+         sendError(message, "missing mandatory non-empty field 'exp'");
+         return null;
+      }
+
+      CASValue<Object> value = memClient.asyncGetAndTouch(key, exp).get(operationTimeOut, timeUnit);
+
+      JsonObject response = new JsonObject();
+      JsonObject data = new JsonObject();
+      response.putObject("data", data);
+      if(value != null)
+      {
+         try
+         {
+            data = parseForJson(data, "key", value.getValue());
+         }
+         catch (Exception e)
+         {
+            sendError(message, e.getMessage());
+            return null;
+         }
+         Long c = value.getCas();
+         if(c != null)
+         {
+            data.putNumber("cas", value.getCas());
+         }
+         response.putBoolean("success", true);
+      }
+      else
+      {
+         response.putBoolean("success", false);
+         response.putString("reason", "failed to fetch key '" + key +"'");
+      }
+
+      return response;
    }
 
    private JsonObject replace(Message<JsonObject> message) throws Exception
@@ -281,7 +457,7 @@ public class MemClient extends BusModBase implements Handler<Message<JsonObject>
       return response;
    }
 
-   //there is a known issue with touch in current memcached version 1.4.5_4_gaa7839e.
+   //there seems to be an issue with touch in current memcached version 1.4.5_4_gaa7839e.
    //should work once fixed though.
    private JsonObject touch(Message<JsonObject> message) throws Exception
    {
