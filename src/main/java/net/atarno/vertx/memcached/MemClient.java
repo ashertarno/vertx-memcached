@@ -156,13 +156,13 @@ public class MemClient extends BusModBase implements Handler<Message<JsonObject>
          }
       }
       catch (InterruptedException e) {
-         sendError(message, "failed to complete the operation within " + operationTimeOut + " " + timeUnit);
+         sendError(message, "failed to complete '" + command + "' operation within " + operationTimeOut + " " + timeUnit.name().toLowerCase());
       }
       catch (ExecutionException e) {
-         sendError(message, "operation failed");
+         sendError(message, "operation '"+ command + "' failed");
       }
       catch (TimeoutException e) {
-         sendError(message, "failed to complete the operation within " + operationTimeOut + " " + timeUnit );
+         sendError(message, "failed to complete '"+ command + "' operation within " + operationTimeOut + " " + timeUnit.name().toLowerCase() );
       }
       catch (Exception e) {
          sendError(message, e.getMessage());
@@ -228,7 +228,7 @@ public class MemClient extends BusModBase implements Handler<Message<JsonObject>
       if(decr_val != null)
       {
          response.putBoolean("success", true);
-         data.putNumber("new_value", decr_val);
+         data.putNumber("value", decr_val);
       }
       else
       {
@@ -263,7 +263,7 @@ public class MemClient extends BusModBase implements Handler<Message<JsonObject>
       if(incr_val != null)
       {
          response.putBoolean("success", true);
-         data.putNumber("new_value", incr_val);
+         data.putNumber("value", incr_val);
       }
       else
       {
