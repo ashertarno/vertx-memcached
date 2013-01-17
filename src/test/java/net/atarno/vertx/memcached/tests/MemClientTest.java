@@ -4,7 +4,7 @@ import org.vertx.java.core.Handler;
 import org.vertx.java.core.eventbus.Message;
 import org.vertx.java.core.json.JsonArray;
 import org.vertx.java.core.json.JsonObject;
-import org.vertx.java.framework.TestClientBase;
+import org.vertx.java.testframework.TestClientBase;
 
 import java.util.HashMap;
 
@@ -23,7 +23,7 @@ public class MemClientTest  extends TestClientBase
       address = "vertx.memcached";
       config.putString("address", address); 
       config.putString("memcached_servers", "localhost:11211");
-      //config.putNumber("operation_timeout", 10000L);
+      config.putNumber("operation_timeout", 1000L);
       container.deployWorkerVerticle("net.atarno.vertx.memcached.MemClient", config, 1, new Handler<String>()
       {
          public void handle(String res)
@@ -31,14 +31,68 @@ public class MemClientTest  extends TestClientBase
             tu.appReady();
 
             HashMap<String, Object> cacheCall = new HashMap<String, Object>();
+
+            cacheCall.put("command", "flush");
+
+            /* cacheCall.put("command", "delete");
+            cacheCall.put("key", "AAA");
+
+            cacheCall.put("command", "decr");
+            cacheCall.put("key", "AAA");
+            cacheCall.put("by", 10);
+
+            cacheCall.put("command", "getStats");
+
+            cacheCall.put("command", "gat");
+            cacheCall.put("key", "AAA");
+            cacheCall.put("exp", 0);
+
+             cacheCall.put("command", "replace");
+            cacheCall.put("key", "AAA");
+            cacheCall.put("exp", 0);
+            cacheCall.put("value", "yyyy");
+
+            cacheCall.put("command", "add");
+            cacheCall.put("key", "AAA");
+            cacheCall.put("value", "zzz");
+            cacheCall.put("cas", 0);
+
+            cacheCall.put("command", "prepend");
+            cacheCall.put("key", "AAA");
+            cacheCall.put("value", "-2-10 ");
+            cacheCall.put("cas", 0);
+
+             cacheCall.put("command", "append");
+            cacheCall.put("key", "AAA");
+            cacheCall.put("value", " 5678");
+            cacheCall.put("cas", 0);
+
+            cacheCall.put("command", "touch");
+            cacheCall.put("key", "AAA");
+            cacheCall.put("exp", 2222);
+
+              cacheCall.put("command", "status");
+
+            cacheCall = new HashMap<String, Object>();
+            cacheCall.put("command", "getBulk");
+            cacheCall.put("keys", new JsonArray(
+                    new String[]{"AAA",
+                            "bbb",
+                            "ccc"}));
+
             cacheCall.put("command", "set");
             cacheCall.put("key", "AAA");
             cacheCall.put("value", 1234);
-            act(cacheCall);
 
             cacheCall = new HashMap<String, Object>();
             cacheCall.put("command", "get");
             cacheCall.put("key", "AAA");
+
+            cacheCall = new HashMap<String, Object>();
+            cacheCall.put("command", "delete");
+            cacheCall.put("key", "ZZZ");
+
+            */
             act(cacheCall);
          }
       });
@@ -75,7 +129,7 @@ public class MemClientTest  extends TestClientBase
                notif.putArray(key, (JsonArray) value);
          }   
       }
-
+      System.out.println(notif.encode());
       push(notif);
    }
 
