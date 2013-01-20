@@ -20,6 +20,9 @@ import net.spy.memcached.AddrUtil;
 import net.spy.memcached.BinaryConnectionFactory;
 import net.spy.memcached.CASValue;
 import net.spy.memcached.MemcachedClient;
+import net.spy.memcached.internal.BulkFuture;
+import net.spy.memcached.internal.GetFuture;
+import net.spy.memcached.internal.OperationFuture;
 import org.vertx.java.busmods.BusModBase;
 import org.vertx.java.core.Handler;
 import org.vertx.java.core.eventbus.Message;
@@ -173,11 +176,12 @@ public class MemClient extends BusModBase implements Handler<Message<JsonObject>
    {
       int delay = message.body.getInteger("delay") == null ? 0 : message.body.getInteger("delay");
 
-      boolean success = memClient.flush(delay).get(operationTimeOut, timeUnit);
+      OperationFuture<Boolean> operationFuture = memClient.flush(delay);
 
       JsonObject response = new JsonObject();
       JsonObject data = new JsonObject();
       response.putObject("data", data);
+      boolean success = operationFuture.get(operationTimeOut, timeUnit);
       response.putBoolean("success", success);
       return response;
    }
@@ -191,11 +195,12 @@ public class MemClient extends BusModBase implements Handler<Message<JsonObject>
          return null;
       }
 
-      boolean success = memClient.delete(key).get(operationTimeOut, timeUnit);
+      OperationFuture<Boolean> operationFuture = memClient.delete(key);
 
       JsonObject response = new JsonObject();
       JsonObject data = new JsonObject();
       response.putObject("data", data);
+      boolean success = operationFuture.get(operationTimeOut, timeUnit);
       response.putBoolean("success", success);
       if(!success)
       {
@@ -220,11 +225,12 @@ public class MemClient extends BusModBase implements Handler<Message<JsonObject>
          return null;
       }
 
-      Long decr_val = memClient.asyncDecr(key, by).get(operationTimeOut, timeUnit);
+      OperationFuture<Long> operationFuture = memClient.asyncDecr(key, by);
 
       JsonObject response = new JsonObject();
       JsonObject data = new JsonObject();
       response.putObject("data", data);
+      Long decr_val = operationFuture.get(operationTimeOut, timeUnit);
       if(decr_val != null)
       {
          response.putBoolean("success", true);
@@ -255,11 +261,12 @@ public class MemClient extends BusModBase implements Handler<Message<JsonObject>
          return null;
       }
 
-      Long incr_val = memClient.asyncIncr(key, by).get(operationTimeOut, timeUnit);
+      OperationFuture<Long> operationFuture = memClient.asyncIncr(key, by);
 
       JsonObject response = new JsonObject();
       JsonObject data = new JsonObject();
       response.putObject("data", data);
+      Long incr_val = operationFuture.get(operationTimeOut, timeUnit);
       if(incr_val != null)
       {
          response.putBoolean("success", true);
@@ -313,11 +320,12 @@ public class MemClient extends BusModBase implements Handler<Message<JsonObject>
          return null;
       }
 
-      CASValue<Object> value = memClient.asyncGetAndTouch(key, exp).get(operationTimeOut, timeUnit);
+      OperationFuture<CASValue<Object>> operationFuture = memClient.asyncGetAndTouch(key, exp);
 
       JsonObject response = new JsonObject();
       JsonObject data = new JsonObject();
       response.putObject("data", data);
+      CASValue<Object> value = operationFuture.get(operationTimeOut, timeUnit);
       if(value != null)
       {
          try
@@ -356,11 +364,12 @@ public class MemClient extends BusModBase implements Handler<Message<JsonObject>
       int exp = message.body.getInteger("exp") == null ? 0 : message.body.getInteger("exp");
       Object value = message.body.getField("value");
 
-      boolean success = memClient.replace(key, exp, value).get(operationTimeOut, timeUnit);
+      OperationFuture<Boolean> operationFuture = memClient.replace(key, exp, value);
 
       JsonObject response = new JsonObject();
       JsonObject data = new JsonObject();
       response.putObject("data", data);
+      boolean success = operationFuture.get(operationTimeOut, timeUnit);
       response.putBoolean("success", success);
       if(!success)
       {
@@ -381,11 +390,12 @@ public class MemClient extends BusModBase implements Handler<Message<JsonObject>
       int exp = message.body.getInteger("exp") == null ? 0 : message.body.getInteger("exp");
       Object value = message.body.getField("value");
 
-      boolean success = memClient.add(key, exp, value).get(operationTimeOut, timeUnit);
+      OperationFuture<Boolean> operationFuture = memClient.add(key, exp, value);
 
       JsonObject response = new JsonObject();
       JsonObject data = new JsonObject();
       response.putObject("data", data);
+      boolean success = operationFuture.get(operationTimeOut, timeUnit);
       response.putBoolean("success", success);
       if(!success)
       {
@@ -411,11 +421,12 @@ public class MemClient extends BusModBase implements Handler<Message<JsonObject>
       }
       Object value = message.body.getField("value");
 
-      boolean success = memClient.prepend(cas, key, value).get(operationTimeOut, timeUnit);
+      OperationFuture<Boolean> operationFuture = memClient.prepend(cas, key, value);
 
       JsonObject response = new JsonObject();
       JsonObject data = new JsonObject();
       response.putObject("data", data);
+      boolean success = operationFuture.get(operationTimeOut, timeUnit);
       response.putBoolean("success", success);
       if(!success)
       {
@@ -442,11 +453,12 @@ public class MemClient extends BusModBase implements Handler<Message<JsonObject>
 
       Object value = message.body.getField("value");
 
-      boolean success = memClient.append(cas, key, value).get(operationTimeOut, timeUnit);
+      OperationFuture<Boolean> operationFuture = memClient.append(cas, key, value);
 
       JsonObject response = new JsonObject();
       JsonObject data = new JsonObject();
       response.putObject("data", data);
+      boolean success = operationFuture.get(operationTimeOut, timeUnit);
       response.putBoolean("success", success);
       if(!success)
       {
@@ -472,11 +484,12 @@ public class MemClient extends BusModBase implements Handler<Message<JsonObject>
          sendError(message, "missing mandatory non-empty field 'exp'");
          return null;
       }
-      boolean success = memClient.touch(key, exp.intValue()).get(operationTimeOut, timeUnit);
+      OperationFuture<Boolean> operationFuture = memClient.touch(key, exp.intValue());
 
       JsonObject response = new JsonObject();
       JsonObject data = new JsonObject();
       response.putObject("data", data);
+      boolean success = operationFuture.get(operationTimeOut, timeUnit);
       response.putBoolean("success", success);
       if(!success)
       {
@@ -525,11 +538,12 @@ public class MemClient extends BusModBase implements Handler<Message<JsonObject>
          keysList.add((String) o);
       }
 
-      Map<String, Object> result = memClient.asyncGetBulk(keysList).get(operationTimeOut, timeUnit);
+      BulkFuture<Map<String, Object>> bulkFuture = memClient.asyncGetBulk(keysList);
 
       JsonObject response = new JsonObject();
       JsonObject data = new JsonObject();
       response.putObject("data", data);
+      Map<String, Object> result = bulkFuture.get(operationTimeOut, timeUnit);
       for(String k : keysList)
       {
          Object value = result.get(k);
@@ -559,11 +573,12 @@ public class MemClient extends BusModBase implements Handler<Message<JsonObject>
       Object value = message.body.getField("value");
       int exp = message.body.getInteger("exp") == null ? 0 : message.body.getInteger("exp");
 
-      boolean success = memClient.set(key, exp, value).get(operationTimeOut, timeUnit);
-
+      OperationFuture<Boolean> future = memClient.set(key, exp, value);
       JsonObject response = new JsonObject();
       JsonObject data = new JsonObject();
       response.putObject("data", data);
+
+      boolean success = future.get(operationTimeOut, timeUnit);
       response.putBoolean("success", success);
       if(!success)
       {
@@ -582,10 +597,11 @@ public class MemClient extends BusModBase implements Handler<Message<JsonObject>
          return null;
       }
        
-      Object value = memClient.asyncGet(key).get(operationTimeOut, timeUnit);
+      GetFuture<Object> objectGetFuture = memClient.asyncGet(key);
       JsonObject response = new JsonObject();
       JsonObject data = new JsonObject();
       response.putObject("data", data);
+      Object value = objectGetFuture.get(operationTimeOut, timeUnit);
       try
       {
          data = parseForJson(data, "key", value);
