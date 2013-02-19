@@ -1,7 +1,14 @@
-vert-gcm is licensed under the Apache License, Version 2.0 (the "License");
+vert-memcached is licensed under the Apache License, Version 2.0 (the "License");
 
 You may not use it except in compliance with the License.
 
 You may obtain a copy of the License at
 
 http://www.apache.org/licenses/LICENSE-2.0
+
+spymemcached software, used in this distribution, is licensed under MIT License.
+
+You may obtain a copy of the License at
+
+http://opensource.org/licenses/mit-license.php
+

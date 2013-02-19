@@ -1,17 +1,17 @@
-# Memcached busmod for Vert.x #
+# Memcached mod for Vert.x #
 
-This module provides a Vert.x client for cache/storage servers, implementing memcached protocol. The name of this busmod is `vertx-memcached`. 
+This module provides a Vert.x client for cache/storage servers, implementing memcached protocol. The name of this mod is `vertx-memcached`. 
 
 ## Dependencies ##
 
-Memcached connectivity is implemented using an asynchronous, Java written Spymemcached client.
+Memcached connectivity is implemented using a non-blocking spymemcached client.
 
 More info about spymemcached project is available [here](http://code.google.com/p/spymemcached/ "spymemcached"). 
   
 
 ## Configuration ##
 
-`vertx-memcached` is a worker mod. Each `vertx-memcached` worker incorporates one spymemcached client. Consider to use multiple `vertx-memcached` workers to achieve a connection-pool like functionality.
+`vertx-memcached` is a **non**-worker mod. Each `vertx-memcached` verticle can incorporate one-to-n spymemcached clients in a "pool". 
 
 Here is an example of`vertx-memcached` worker configuration:
 
@@ -19,18 +19,26 @@ Here is an example of`vertx-memcached` worker configuration:
 <code>
 {
     "address" : "vertx.memcached",
-    "memcached_servers": "localhost:11211",
-    "operation_timeout": 5000
+    "memcached.servers": "localhost:11211",
+    "memcached.timeout.ms": 5000,
+	"memcached.tasks.check.ms": 10,
+    "memcached.connections": 2
 }
 </code>
 </pre>
  
 where
 
-- `address` - the worker address on vert.x busmod. Mandatory.
-- `memcached_servers` - the address of your memcached server(s). 1 to n space separated addresses can be passed, each of these should be in the following format: `<hostname:port>`. Mandatory.
+- `address` - the eventbus address of mod's verticles . Mandatory.
+- `memcached.servers` - the address of your memcached server(s). 1 to n space separated addresses can be passed, each of these should be in the following format: `<hostname:port>`. Mandatory.
 
-- `operation_timeout` - to solve unexpected IO related issues between memcached client and server, all operations taking too long to execute are aborted after provided time-out (milliseconds). Optional, default - 10000 millis.
+- `memcached.connections` - the number of spymemcached clients that will be initialized on verticle start up. These clients will be used randomly, in a way that mimics a connection pool behavior. Since spymemcached client is async and non-blocking, there is no need to use a lot of clients in such pool. Optional, default - 2.
+
+- `memcached.tasks.check.ms` - to avoid verticle from being blocked while waiting for an operation that should return a result and is taking too long to complete, such operation is put to a queue, where it is repeatedly checked for completion. The completion of such operations will be checked every provided number of milliseconds. Optional, default - 10 ms.  
+
+- `memcached.timeout.ms` - in case operations submitted to memcached server (see above) were not completed within number of milliseconds provided with this parameter, the operation is cancelled and time-out error is returned. Optional, default - 10000 ms.
+
+ 
 
 ## Usage ##
 
@@ -227,4 +235,7 @@ Here is a json of such response:
 </code>
 </pre>
 
-`response` block always includes a boolean `"success"` parameter, showing if the request operation was successful. This may be used mainly for logging and debugging. F.e., an attempt to get a value by key 'ZZZ' will return `"success":true` if the key is indeed found in cache. If this key is not found in cache, `"success":false,"reason":"failed to fetch key 'ZZZ'"` will return.  
+`response` block always includes a boolean `"success"` parameter, showing if the request operation was successful. This may be used mainly for logging and debugging. F.e., an attempt to get a value by key 'ZZZ' will return `"success":true` if the key is indeed found in cache. If this key is not found in cache, `"success":false,"reason":"failed to fetch key 'ZZZ'"` will return. 
+
+** For all operations that do not return any value (f.e. set, delete, etc.), an option to receive an execution report is provided. To receive such report,
+add `"shouldReply": true` to the message body. This is optional, by default no execution reports will be returned. Keep in mind that operations that should return a response (f.e. get, getBulk, etc.) will do so even if `"shouldReply": false` is passed. ** 
