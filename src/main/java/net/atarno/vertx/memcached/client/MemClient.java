@@ -24,9 +24,8 @@ import org.vertx.java.deploy.Verticle;
  * Please see the manual for a full description<p>
  *
  * @author <a href="mailto:atarno@gmail.com">Asher Tarnopolski</a>
- *
- * <p>
- *
+ *         <p/>
+ *         <p/>
  */
 public class MemClient extends Verticle {
     private String address;
@@ -38,6 +37,7 @@ public class MemClient extends Verticle {
     private Logger logger;
     private List<MemFuture> pending;
     private MemcachedClient[] memClients;
+    private long timerTaskId = -1;
 
     @Override
     public void start() throws Exception {
@@ -47,50 +47,10 @@ public class MemClient extends Verticle {
         address = container.getConfig().getString("address", "vertx.memcached");
         memServers = container.getConfig().getString("memcached.servers");
         timeOutMillis = container.getConfig().getNumber("memcached.timeout.ms", 10000).intValue();
-        taskCheckMillis = container.getConfig().getNumber("memcached.tasks.check.ms", 10).intValue();
+        taskCheckMillis = container.getConfig().getNumber("memcached.tasks.check.ms", 50).intValue();
         int connections = container.getConfig().getNumber("memcached.connections", 1).intValue();
         // init connection pool
         initMemClients(connections);
-
-        // add timer task for delayed tasks
-        vertx.setPeriodic(taskCheckMillis, new Handler<Long>() {
-            public void handle(Long timerId) {
-                for (int i = pending.size()-1; i >= 0; i--) {
-                    MemFuture mf = pending.get(i);
-                    boolean shouldReply = shouldReply(mf.getMessage());
-                    JsonObject r = null;
-                    if (mf.getFuture().isDone()) {
-                        pending.remove(i);
-                        try{
-                            r = mf.getCommand().buildResponse(mf.getMessage(), mf.getFuture(), shouldReply);
-                        } catch (TimeoutException e) {
-                            sendError(mf.getMessage(), "operation '" + mf.getCommand().name().toLowerCase() + "' timed out");
-                        } catch (ExecutionException e) {
-                            sendError(mf.getMessage(), "operation '" + mf.getCommand().name().toLowerCase() + "' failed");
-                        } catch (Exception e) {
-                            sendError(mf.getMessage(), e.getMessage());
-                        }
-                    } else if (System.currentTimeMillis() - mf.getStartTime() >= timeOutMillis) {
-                        mf.getFuture().cancel(true);
-                        pending.remove(i);
-                        if (shouldReply) {
-                            try{
-                                r = mf.getCommand().buildResponse(mf.getMessage(), null, shouldReply);
-                            } catch (TimeoutException e) {
-                                sendError(mf.getMessage(), "operation '" + mf.getCommand().name().toLowerCase() + "' timed out");
-                            } catch (ExecutionException e) {
-                                sendError(mf.getMessage(), "operation '" + mf.getCommand().name().toLowerCase() + "' failed");
-                            } catch (Exception e) {
-                                sendError(mf.getMessage(), e.getMessage());
-                            }
-                        }
-                    }
-                    if (r != null){
-                        sendOK(mf.getMessage(), r);
-                    }
-                }
-            }
-        });
 
         // register verticle
         eb.registerHandler(address, memHandler, new AsyncResultHandler<Void>() {
@@ -112,14 +72,57 @@ public class MemClient extends Verticle {
             try {
                 MemCommand mc = getByName(command);
                 Future f = mc.query(getMemClient(), message);
-                if(f.isDone()){
-                    if(shouldReply(message)) {
+                if (f.isDone()) {
+                    if (shouldReply(message)) {
                         sendOK(message, mc.buildResponse(message, f, shouldReply(message)));
                     }
-                }
-                else {
+                } else {
                     MemFuture mf = new MemFuture(f, message, mc);
                     pending.add(mf);
+                    if (timerTaskId == -1) {
+                        timerTaskId = vertx.setPeriodic(taskCheckMillis, new Handler<Long>() {
+                            public void handle(Long timerId) {
+                                for (int i = pending.size() - 1; i >= 0; i--) {
+                                    MemFuture mf = pending.get(i);
+                                    boolean shouldReply = shouldReply(mf.getMessage());
+                                    JsonObject r = null;
+                                    if (mf.getFuture().isDone()) {
+                                        pending.remove(i);
+                                        try {
+                                            r = mf.getCommand().buildResponse(mf.getMessage(), mf.getFuture(), shouldReply);
+                                        } catch (TimeoutException e) {
+                                            sendError(mf.getMessage(), "operation '" + mf.getCommand().name().toLowerCase() + "' timed out");
+                                        } catch (ExecutionException e) {
+                                            sendError(mf.getMessage(), "operation '" + mf.getCommand().name().toLowerCase() + "' failed");
+                                        } catch (Exception e) {
+                                            sendError(mf.getMessage(), e.getMessage());
+                                        }
+                                    } else if (System.currentTimeMillis() - mf.getStartTime() >= timeOutMillis) {
+                                        mf.getFuture().cancel(true);
+                                        pending.remove(i);
+                                        if (shouldReply) {
+                                            try {
+                                                r = mf.getCommand().buildResponse(mf.getMessage(), null, shouldReply);
+                                            } catch (TimeoutException e) {
+                                                sendError(mf.getMessage(), "operation '" + mf.getCommand().name().toLowerCase() + "' timed out");
+                                            } catch (ExecutionException e) {
+                                                sendError(mf.getMessage(), "operation '" + mf.getCommand().name().toLowerCase() + "' failed");
+                                            } catch (Exception e) {
+                                                sendError(mf.getMessage(), e.getMessage());
+                                            }
+                                        }
+                                    }
+                                    if (r != null) {
+                                        sendOK(mf.getMessage(), r);
+                                    }
+                                }
+                                if (pending.isEmpty()) {
+                                    vertx.cancelTimer(timerTaskId);
+                                    timerTaskId = -1;
+                                }
+                            }
+                        });
+                    }
                 }
 
             } catch (TimeoutException e) {

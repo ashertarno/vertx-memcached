@@ -21,7 +21,7 @@ Here is an example of`vertx-memcached` worker configuration:
     "address" : "vertx.memcached",
     "memcached.servers": "localhost:11211",
     "memcached.timeout.ms": 5000,
-	"memcached.tasks.check.ms": 10,
+	"memcached.tasks.check.ms": 100,
     "memcached.connections": 2
 }
 </code>
@@ -34,7 +34,7 @@ where
 
 - `memcached.connections` - the number of spymemcached clients that will be initialized on verticle start up. These clients will be used randomly, in a way that mimics a connection pool behavior. Since spymemcached client is async and non-blocking, there is no need to use a lot of clients in such pool. Optional, default - 2.
 
-- `memcached.tasks.check.ms` - to avoid verticle from being blocked while waiting for an operation that should return a result and is taking too long to complete, such operation is put to a queue, where it is repeatedly checked for completion. The completion of such operations will be checked every provided number of milliseconds. Optional, default - 10 ms.  
+- `memcached.tasks.check.ms` - to avoid verticle from being blocked while waiting for an operation that should return a result and is taking too long to complete, such operation is put to a queue, where it is repeatedly checked for completion. The completion of such operations will be checked every provided number of milliseconds. Optional, default - 50 ms.  
 
 - `memcached.timeout.ms` - in case operations submitted to memcached server (see above) were not completed within number of milliseconds provided with this parameter, the operation is cancelled and time-out error is returned. Optional, default - 10000 ms.
 
