@@ -68,10 +68,10 @@ Please edit the details below.
  */
 def configurePom(def pom) {
   pom.project {
-    description 'Description of your module here'
+    description 'A vert.x client for cache/storage servers implementing memcached protocol'
     inceptionYear '2013'
     packaging 'zip'
-    url 'Your project url'
+    url 'https://github.com/ashertarno/vertx-memcached'
 
     developers {
       developer {
