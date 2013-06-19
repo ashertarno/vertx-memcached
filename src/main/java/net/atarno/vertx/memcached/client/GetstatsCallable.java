@@ -10,7 +10,7 @@ public class GetstatsCallable implements Callable<Map<SocketAddress, Map<String,
 
     private MemcachedClient memClient;
 
-    public GetstatsCallable(MemcachedClient memClient) {
+    public GetstatsCallable( MemcachedClient memClient ) {
         this.memClient = memClient;
     }
 

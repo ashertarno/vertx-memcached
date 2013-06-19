@@ -1,0 +1,9 @@
+{
+    "main": "net.atarno.vertx.memcached.client.MemClient",
+    "worker": false,
+    "licenses": ["The Apache Software License Version 2.0", "MIT License"],
+    "description": "This module provides a Vert.x client for cache/storage servers implementing memcached protocol.",
+    "author": "Asher Tarnopolski",
+    "keywords": ["memcached", "cache", "spymemcached"],
+    "homepage": "https://github.com/ashertarno/vertx-memcached"
+}
