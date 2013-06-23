@@ -13,3 +13,5 @@ target
 out
 langs.properties
 mods
+*.gradle
+gradle.properties
