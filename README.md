@@ -2,9 +2,12 @@
 
 This module provides a Vert.x client for cache/storage servers, implementing memcached protocol. The name of this mod is `vertx-memcached`. 
 
+Version 3.0.0 supports the asynchronous listeners released by spymemcached starting version 2.9. The code was totally re-factored.
+Version 2.1.0 of this project is deprecated now and you are strongly advised to upgrade.  
+
 ## Dependencies ##
 
-Memcached connectivity is implemented using a non-blocking spymemcached client.
+Memcached connectivity is implemented using a non-blocking spymemcached client. Current version is built and tested with spymemcached 2.11.3.
 
 More info about spymemcached project is available [here](http://code.google.com/p/spymemcached/ "spymemcached"). 
   
@@ -20,8 +23,7 @@ Here is an example of`vertx-memcached` worker configuration:
 {
     "address" : "vertx.memcached",
     "memcached.servers": "localhost:11211",
-    "memcached.timeout.ms": 5000,
-	"memcached.tasks.check.ms": 100,
+    "memcached.timeout.ms": 2500,
     "memcached.connections": 2
 }
 </code>
@@ -34,26 +36,12 @@ where
 
 - `memcached.connections` - the number of spymemcached clients that will be initialized on verticle start up. These clients will be used randomly, in a way that mimics a connection pool behavior. Since spymemcached client is async and non-blocking, there is no need to use a lot of clients in such pool. Optional, default - 2.
 
-- `memcached.tasks.check.ms` - to avoid verticle from being blocked while waiting for an operation that should return a result and is taking too long to complete, such operation is put to a queue, where it is repeatedly checked for completion. The completion of such operations will be checked every provided number of milliseconds. Optional, default - 50 ms.  
+- `memcached.timeout.ms` - in case operations submitted to memcached server (see above) were not completed within number of milliseconds provided with this parameter, the operation is cancelled and time-out error is returned. Optional, default value of net.spy.memcached.DefaultConnectionFactory.DEFAULT_OPERATION_TIMEOUT value will be used (currently = 2500L)
 
-- `memcached.timeout.ms` - in case operations submitted to memcached server (see above) were not completed within number of milliseconds provided with this parameter, the operation is cancelled and time-out error is returned. Optional, default - 10000 ms.
-
- 
 
 ## Usage ##
 
-Memcached storage is done using key-value pairs, where key is always a String.
-Since `JsonObject` and `JsonArray` are not serializable in current version of vert.x, only objects of the following types can be used as values to store:
-
-
-- byte[]
-
-- Boolean
-
-- Number
-
-- String  
-
+Memcached storage is done using key-value pairs, where key is always a String. The value can be of any serializable type. Keep in mind that not all types of objects can be transmitted through vert.x's eventbus though. 
 
 ## Supported memcached commands ##
 
@@ -87,7 +75,7 @@ Since `JsonObject` and `JsonArray` are not serializable in current version of ve
 }
 </code>
 </pre> 
-- `status` - Get the addresses of available and unavailable servers
+- `status` - Get the addresses of available and unavailable servers **! this command supported only as a synchronous blocking api !**
 <pre>
 <code>
 {
@@ -159,7 +147,7 @@ Since `JsonObject` and `JsonArray` are not serializable in current version of ve
 }
 </code>
 </pre>
-- `getstats` - Get all of the stats from all of the connections
+- `getstats` - Get all of the stats from all of the connections  **! this command supported only as a synchronous blocking api !** 
 <pre>
 <code>
 {
@@ -207,12 +195,12 @@ Since `JsonObject` and `JsonArray` are not serializable in current version of ve
 
 ## Memcached responses ##
 
-All system/infrastructure/network/etc errors will return with status:error, f.e.:
+All system/infrastructure/network/etc errors will return with `"status":"error"`, e.g.:
 <pre>
 <code>
 {
 	"status":"error",
-	"message":"failed to complete 'set' operation within 10000 milliseconds"
+	"message":"error description"
 }
 
 </code>
@@ -224,18 +212,12 @@ Here is a json of such response:
 <pre>
 <code>
 {
-     "response":{
-				"data":{
-						"key":1234
-				},
-				"success":true
+     "response":{ 
+		"key":"aaa", 
+		"value":1234
 	 },
-	 "status":"ok"
+	 "status":"ok",
+	 "command" : "get"
 }
 </code>
 </pre>
-
-`response` block always includes a boolean `"success"` parameter, showing if the request operation was successful. This may be used mainly for logging and debugging. F.e., an attempt to get a value by key 'ZZZ' will return `"success":true` if the key is indeed found in cache. If this key is not found in cache, `"success":false,"reason":"failed to fetch key 'ZZZ'"` will return. 
-
-** For all operations that do not return any value (f.e. set, delete, etc.), an option to receive an execution report is provided. To receive such report,
-add `"shouldReply": true` to the message body. This is optional, by default no execution reports will be returned. Keep in mind that operations that should return a response (f.e. get, getBulk, etc.) will do so even if `"shouldReply": false` is passed. ** 

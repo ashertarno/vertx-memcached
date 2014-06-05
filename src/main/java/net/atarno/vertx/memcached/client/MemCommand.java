@@ -2,67 +2,98 @@ package net.atarno.vertx.memcached.client;
 
 import net.spy.memcached.CASValue;
 import net.spy.memcached.MemcachedClient;
-import net.spy.memcached.internal.BulkFuture;
-import net.spy.memcached.internal.GetFuture;
-import net.spy.memcached.internal.OperationFuture;
+import net.spy.memcached.internal.*;
+import net.spy.memcached.ops.OperationStatus;
+import org.vertx.java.core.Context;
+import org.vertx.java.core.Handler;
 import org.vertx.java.core.eventbus.Message;
 import org.vertx.java.core.json.JsonArray;
 import org.vertx.java.core.json.JsonObject;
 
 import java.net.InetSocketAddress;
 import java.net.SocketAddress;
-import java.util.*;
-import java.util.concurrent.*;
+import java.util.ArrayList;
+import java.util.Collection;
+import java.util.List;
+import java.util.Map;
 
 @SuppressWarnings( "unchecked" )
 public enum MemCommand {
+
     SET() {
         @Override
-        public Future query( MemcachedClient memClient, Message<JsonObject> message ) throws Exception {
+        public void submitQuery( MemcachedClient memClient, final Message<JsonObject> message, final Context ctx ) throws Exception {
             String key = getKey( message );
             Object value = message.body().getField( "value" );
             int exp = message.body().getInteger( "exp" ) == null ? 0 : message.body().getInteger( "exp" );
-            OperationFuture<Boolean> future = memClient.set( key, exp, value );
-            return future;
+            memClient.set( key, exp, value ).addListener( new OperationCompletionListener() {
+
+                @Override
+                public void onComplete( final OperationFuture<?> f ) throws Exception {
+
+                    ctx.runOnContext( new Handler<Void>() {
+
+                        @Override
+                        public void handle( Void v ) {
+
+                            reply( message, f, f.getStatus() );
+                        }
+                    } );
+                }
+            } );
         }
 
         @Override
-        public JsonObject buildResponse( Message<JsonObject> message, Future future, boolean shouldReply ) throws Exception {
-            if ( !shouldReply ) {
-                return null;
+        public void reply( Message<JsonObject> message, AbstractListenableFuture future, OperationStatus status ) {
+
+            try {
+                checkTimeOut( message, future, status );
+                sendOk( message, null );
             }
-            checkTimeout( future );
-            JsonObject response = new JsonObject();
-            response.putBoolean( "success", future != null );
-            if ( future == null ) {
-                response.putString( "reason", "operation timed out" );
+            catch ( Exception e ) {
+                sendError( message, e.getMessage() );
             }
-            return response;
         }
     },
     GET() {
         @Override
-        public Future query( MemcachedClient memClient, Message<JsonObject> message ) throws Exception {
+        public void submitQuery( MemcachedClient memClient, final Message<JsonObject> message, final Context ctx ) throws Exception {
             String key = getKey( message );
-            GetFuture<Object> f = memClient.asyncGet( key );
-            return f;
+            memClient.asyncGet( key ).addListener( new GetCompletionListener() {
+
+                @Override
+                public void onComplete( final GetFuture<?> f ) throws Exception {
+
+                    ctx.runOnContext( new Handler<Void>() {
+
+                        @Override
+                        public void handle( Void v ) {
+
+                            reply( message, f, f.getStatus() );
+                        }
+                    } );
+                }
+            } );
         }
 
         @Override
-        public JsonObject buildResponse( Message<JsonObject> message, Future future, boolean shouldReply ) throws Exception {
-            checkTimeout( future );
-            JsonObject response = new JsonObject();
-            JsonObject data = new JsonObject();
-            Object value = future.get();
-            data = parseForJson( data, "key", value );
-            response.putObject( "data", data );
-            response.putBoolean( "success", true );
-            return response;
+        public void reply( Message<JsonObject> message, AbstractListenableFuture future, OperationStatus status ) {
+            try {
+                checkTimeOut( message, future, status );
+                JsonObject response = new JsonObject();
+                Object value = future.get();
+                response = parseForJson( response, "key", getKey( message ) );
+                response = parseForJson( response, "value", value );
+                sendOk( message, response );
+            }
+            catch ( Exception e ) {
+                sendError( message, e.getMessage() );
+            }
         }
     },
     GETBULK() {
         @Override
-        public Future query( MemcachedClient memClient, Message<JsonObject> message ) throws Exception {
+        public void submitQuery( MemcachedClient memClient, final Message<JsonObject> message, final Context ctx ) throws Exception {
             JsonArray keys = message.body().getArray( "keys" );
             if ( keys == null || keys.size() == 0 ) {
                 throw new Exception( "missing mandatory non-empty field 'keys'" );
@@ -71,362 +102,453 @@ public enum MemCommand {
             for ( Object o : keys.toArray() ) {
                 keysList.add( ( String ) o );
             }
-            BulkFuture<Map<String, Object>> bulkFuture = memClient.asyncGetBulk( keysList );
-            return bulkFuture;
+            memClient.asyncGetBulk( keysList ).addListener( new BulkGetCompletionListener() {
+
+                @Override
+                public void onComplete( final BulkGetFuture<?> f ) throws Exception {
+
+                    ctx.runOnContext( new Handler<Void>() {
+
+                        @Override
+                        public void handle( Void v ) {
+
+                            reply( message, f, f.getStatus() );
+                        }
+                    } );
+                }
+            } );
         }
 
         @Override
-        public JsonObject buildResponse( Message<JsonObject> message, Future future, boolean shouldReply ) throws Exception {
-            checkTimeout( future );
-            JsonObject response = new JsonObject();
-            JsonObject data = new JsonObject();
-            response.putObject( "data", data );
-            Map<String, Object> result = ( Map<String, Object> ) future.get();
-            for ( String k : result.keySet() ) {
-                Object value = result.get( k );
-                data = parseForJson( data, k, value );
-            }
-            response.putBoolean( "success", true );
+        public void reply( Message<JsonObject> message, AbstractListenableFuture future, OperationStatus status ) {
 
-            return response;
+            try {
+                checkTimeOut( message, future, status );
+                JsonObject response = new JsonObject();
+                JsonArray keys = new JsonArray();
+                JsonArray values = new JsonArray();
+                Map<String, Object> result = ( Map<String, Object> ) future.get();
+                for ( String k : result.keySet() ) {
+                    Object value = result.get( k );
+                    keys.add(k);
+                    values.add(value);
+                }
+                response = parseForJson( response, "keys", keys );
+                response = parseForJson( response, "values", values );
+                sendOk( message, response );
+            }
+            catch ( Exception e ) {
+                sendError( message, e.getMessage() );
+            }
         }
     },
     STATUS() {
         @Override
-        public Future query( MemcachedClient memClient, Message<JsonObject> message ) throws Exception {
-            Future<JsonArray[]> f = syncExecutor.submit( new StatusCallable( memClient ) );
-            return f;
+        public void submitQuery( MemcachedClient memClient, final Message<JsonObject> message, final Context ctx ) throws Exception {
+            Collection<SocketAddress> available = memClient.getAvailableServers();
+            Collection<SocketAddress> unavailable = memClient.getUnavailableServers();
+            JsonArray aArr = new JsonArray();
+            for ( SocketAddress sa : available ) {
+                aArr.addString( ( ( InetSocketAddress ) sa ).getHostString() + ":" + ( ( InetSocketAddress ) sa ).getPort() );
+            }
+            JsonArray uArr = new JsonArray();
+            for ( SocketAddress sa : unavailable ) {
+                uArr.addString( ( ( InetSocketAddress ) sa ).getHostString() + ":" + ( ( InetSocketAddress ) sa ).getPort() );
+            }
+            sendOk( message, new JsonObject().putArray( "available", aArr ).putArray( "unavailable", uArr ) );
         }
 
         @Override
-        public JsonObject buildResponse( Message<JsonObject> message, Future future, boolean shouldReply ) throws Exception {
-            checkTimeout( future );
-            JsonArray[] status = ( JsonArray[] ) future.get();
-            JsonObject response = new JsonObject();
-            JsonObject data = new JsonObject();
-            response.putObject( "data", data );
-            response.putBoolean( "success", true );
-            data.putArray( "available", status[ 0 ] );
-            data.putArray( "unavailable", status[ 1 ] );
-            return response;
+        public void reply( Message<JsonObject> message, AbstractListenableFuture future, OperationStatus status ) {
+            // this is a sync call
         }
     },
     GAT() {
         @Override
-        public Future query( MemcachedClient memClient, Message<JsonObject> message ) throws Exception {
+        public void submitQuery( MemcachedClient memClient, final Message<JsonObject> message, final Context ctx ) throws Exception {
+
             String key = getKey( message );
-            Integer exp = message.body().getInteger( "exp" );
-            if ( exp == null ) {
-                throw new Exception( "missing mandatory non-empty field 'exp'" );
-            }
-            OperationFuture<CASValue<Object>> operationFuture = memClient.asyncGetAndTouch( key, exp );
-            return operationFuture;
+            int exp = message.body().getInteger( "exp" ) == null ? 0 : message.body().getInteger( "exp" );
+
+            memClient.asyncGetAndTouch( key, exp ).addListener( new OperationCompletionListener() {
+
+                @Override
+                public void onComplete( final OperationFuture<?> f ) throws Exception {
+
+                    ctx.runOnContext( new Handler<Void>() {
+
+                        @Override
+                        public void handle( Void v ) {
+
+                            reply( message, f, f.getStatus() );
+                        }
+                    } );
+                }
+            } );
         }
 
         @Override
-        public JsonObject buildResponse( Message<JsonObject> message, Future future, boolean shouldReply ) throws Exception {
-            checkTimeout( future );
-            JsonObject response = new JsonObject();
-            JsonObject data = new JsonObject();
-            response.putObject( "data", data );
-            CASValue<Object> value = ( CASValue<Object> ) future.get();
-            if ( value != null ) {
-                data = parseForJson( data, "key", value.getValue() );
-                Long c = value.getCas();
-                if ( c != null ) {
-                    data.putNumber( "cas", value.getCas() );
-                }
-                response.putBoolean( "success", true );
-            }
-            else {
-                response.putBoolean( "success", false );
-                response.putString( "reason", "failed to fetch key '" + getKey( message ) + "'" );
-            }
+        public void reply( Message<JsonObject> message, AbstractListenableFuture future, OperationStatus status ) {
 
-            return response;
+            try {
+                checkTimeOut( message, future, status );
+                JsonObject response = new JsonObject();
+                CASValue<Object> value = ( CASValue<Object> ) future.get();
+                response = parseForJson( response, "key", getKey( message ) );
+                response = parseForJson( response, "value", value == null ? null : value.getValue() );
+                response = parseForJson( response, "cas", value == null ? null : value.getCas() );
+                sendOk( message, response );
+            }
+            catch ( Exception e ) {
+                sendError( message, e.getMessage() );
+            }
         }
     },
     APPEND() {
         @Override
-        public Future query( MemcachedClient memClient, Message<JsonObject> message ) throws Exception {
+        public void submitQuery( MemcachedClient memClient, final Message<JsonObject> message, final Context ctx ) throws Exception {
+
             String key = getKey( message );
-            Long cas = message.body().getLong( "cas" );
-            if ( cas == null ) {
-                throw new Exception( "missing mandatory non-empty field 'cas'" );
-            }
+            long cas = message.body().getLong( "cas" ) == null ? 0 : message.body().getLong( "cas" );
             Object value = message.body().getField( "value" );
-            OperationFuture<Boolean> operationFuture = memClient.append( cas, key, value );
-            return operationFuture;
+
+            memClient.append( cas, key, value ).addListener( new OperationCompletionListener() {
+
+                @Override
+                public void onComplete( final OperationFuture<?> f ) throws Exception {
+
+                    ctx.runOnContext( new Handler<Void>() {
+
+                        @Override
+                        public void handle( Void v ) {
+
+                            reply( message, f, f.getStatus() );
+                        }
+                    } );
+                }
+            } );
         }
 
         @Override
-        public JsonObject buildResponse( Message<JsonObject> message, Future future, boolean shouldReply ) throws Exception {
-            if ( !shouldReply ) {
-                return null;
-            }
-            checkTimeout( future );
-            JsonObject response = new JsonObject();
-            JsonObject data = new JsonObject();
-            response.putObject( "data", data );
-            boolean success = ( Boolean ) future.get();
-            response.putBoolean( "success", success );
-            if ( !success ) {
-                response.putString( "reason", "failed to fetch key '" + getKey( message ) + "'" );
-            }
+        public void reply( Message<JsonObject> message, AbstractListenableFuture future, OperationStatus status ) {
 
-            return response;
+            try {
+                checkTimeOut( message, future, status );
+                sendOk( message, null );
+            }
+            catch ( Exception e ) {
+                sendError( message, e.getMessage() );
+            }
         }
     },
     PREPEND() {
         @Override
-        public Future query( MemcachedClient memClient, Message<JsonObject> message ) throws Exception {
+        public void submitQuery( MemcachedClient memClient, final Message<JsonObject> message, final Context ctx ) throws Exception {
+
             String key = getKey( message );
-            Long cas = message.body().getLong( "cas" );
-            if ( cas == null ) {
-                throw new Exception( "missing mandatory non-empty field 'cas'" );
-            }
+            long cas = message.body().getLong( "cas" ) == null ? 0 : message.body().getLong( "cas" );
             Object value = message.body().getField( "value" );
-            OperationFuture<Boolean> operationFuture = memClient.prepend( cas, key, value );
-            return operationFuture;
+
+            memClient.prepend( cas, key, value ).addListener( new OperationCompletionListener() {
+
+                @Override
+                public void onComplete( final OperationFuture<?> f ) throws Exception {
+
+                    ctx.runOnContext( new Handler<Void>() {
+
+                        @Override
+                        public void handle( Void v ) {
+
+                            reply( message, f, f.getStatus() );
+                        }
+                    } );
+                }
+            } );
         }
 
         @Override
-        public JsonObject buildResponse( Message<JsonObject> message, Future future, boolean shouldReply ) throws Exception {
-            if ( !shouldReply ) {
-                return null;
-            }
-            checkTimeout( future );
-            JsonObject response = new JsonObject();
-            JsonObject data = new JsonObject();
-            response.putObject( "data", data );
-            boolean success = ( Boolean ) future.get();
-            response.putBoolean( "success", success );
-            if ( !success ) {
-                response.putString( "reason", "failed to fetch key '" + getKey( message ) + "'" );
-            }
+        public void reply( Message<JsonObject> message, AbstractListenableFuture future, OperationStatus status ) {
 
-            return response;
+            try {
+                checkTimeOut( message, future, status );
+                sendOk( message, null );
+            }
+            catch ( Exception e ) {
+                sendError( message, e.getMessage() );
+            }
         }
     },
     ADD() {
         @Override
-        public Future query( MemcachedClient memClient, Message<JsonObject> message ) throws Exception {
+        public void submitQuery( MemcachedClient memClient, final Message<JsonObject> message, final Context ctx ) throws Exception {
+
             String key = getKey( message );
             int exp = message.body().getInteger( "exp" ) == null ? 0 : message.body().getInteger( "exp" );
             Object value = message.body().getField( "value" );
-            OperationFuture<Boolean> operationFuture = memClient.add( key, exp, value );
-            return operationFuture;
+
+            memClient.add( key, exp, value ).addListener( new OperationCompletionListener() {
+
+                @Override
+                public void onComplete( final OperationFuture<?> f ) throws Exception {
+
+                    ctx.runOnContext( new Handler<Void>() {
+
+                        @Override
+                        public void handle( Void v ) {
+
+                            reply( message, f, f.getStatus() );
+                        }
+                    } );
+                }
+            } );
         }
 
         @Override
-        public JsonObject buildResponse( Message<JsonObject> message, Future future, boolean shouldReply ) throws Exception {
-            if ( !shouldReply ) {
-                return null;
-            }
-            checkTimeout( future );
-            JsonObject response = new JsonObject();
-            JsonObject data = new JsonObject();
-            response.putObject( "data", data );
-            boolean success = ( Boolean ) future.get();
-            response.putBoolean( "success", success );
-            if ( !success ) {
-                response.putString( "reason", "failed to fetch key '" + getKey( message ) + "'" );
-            }
+        public void reply( Message<JsonObject> message, AbstractListenableFuture future, OperationStatus status ) {
 
-            return response;
+            try {
+                checkTimeOut( message, future, status );
+                sendOk( message, null );
+            }
+            catch ( Exception e ) {
+                sendError( message, e.getMessage() );
+            }
         }
     },
     REPLACE() {
         @Override
-        public Future query( MemcachedClient memClient, Message<JsonObject> message ) throws Exception {
+        public void submitQuery( MemcachedClient memClient, final Message<JsonObject> message, final Context ctx ) throws Exception {
+
             String key = getKey( message );
             int exp = message.body().getInteger( "exp" ) == null ? 0 : message.body().getInteger( "exp" );
             Object value = message.body().getField( "value" );
-            OperationFuture<Boolean> operationFuture = memClient.replace( key, exp, value );
-            return operationFuture;
+
+            memClient.replace( key, exp, value ).addListener( new OperationCompletionListener() {
+
+                @Override
+                public void onComplete( final OperationFuture<?> f ) throws Exception {
+
+                    ctx.runOnContext( new Handler<Void>() {
+
+                        @Override
+                        public void handle( Void v ) {
+
+                            reply( message, f, f.getStatus() );
+                        }
+                    } );
+                }
+            } );
         }
 
         @Override
-        public JsonObject buildResponse( Message<JsonObject> message, Future future, boolean shouldReply ) throws Exception {
-            checkTimeout( future );
-            JsonObject response = new JsonObject();
-            JsonObject data = new JsonObject();
-            response.putObject( "data", data );
-            boolean success = ( Boolean ) future.get();
-            response.putBoolean( "success", success );
-            if ( !success ) {
-                response.putString( "reason", "failed to fetch key '" + getKey( message ) + "'" );
+        public void reply( Message<JsonObject> message, AbstractListenableFuture future, OperationStatus status ) {
+
+            try {
+                checkTimeOut( message, future, status );
+                sendOk( message, null );
             }
-            return response;
+            catch ( Exception e ) {
+                sendError( message, e.getMessage() );
+            }
         }
     },
     TOUCH() {
         @Override
-        public Future query( MemcachedClient memClient, Message<JsonObject> message ) throws Exception {
+        public void submitQuery( MemcachedClient memClient, final Message<JsonObject> message, final Context ctx ) throws Exception {
             String key = getKey( message );
-            Integer exp = message.body().getInteger( "exp" );
-            if ( exp == null ) {
-                throw new Exception( "missing mandatory non-empty field 'exp'" );
-            }
-            OperationFuture<Boolean> operationFuture = memClient.touch( key, exp.intValue() );
-            return operationFuture;
+            int exp = message.body().getInteger( "exp" ) == null ? 0 : message.body().getInteger( "exp" );
+
+            memClient.touch( key, exp ).addListener( new OperationCompletionListener() {
+
+                @Override
+                public void onComplete( final OperationFuture<?> f ) throws Exception {
+
+                    ctx.runOnContext( new Handler<Void>() {
+
+                        @Override
+                        public void handle( Void v ) {
+
+                            reply( message, f, f.getStatus() );
+                        }
+                    } );
+                }
+            } );
+
         }
 
         @Override
-        public JsonObject buildResponse( Message<JsonObject> message, Future future, boolean shouldReply ) throws Exception {
-            if ( !shouldReply ) {
-                return null;
+        public void reply( Message<JsonObject> message, AbstractListenableFuture future, OperationStatus status ) {
+
+            try {
+                checkTimeOut( message, future, status );
+                sendOk( message, null );
             }
-            checkTimeout( future );
-            JsonObject response = new JsonObject();
-            JsonObject data = new JsonObject();
-            response.putObject( "data", data );
-            boolean success = ( Boolean ) future.get();
-            response.putBoolean( "success", success );
-            if ( !success ) {
-                response.putString( "reason", "failed to fetch key '" + getKey( message ) + "'" );
+            catch ( Exception e ) {
+                sendError( message, e.getMessage() );
             }
-            return response;
         }
     },
     GETSTATS() {
         @Override
-        public Future query( MemcachedClient memClient, Message<JsonObject> message ) throws Exception {
-            Future<Map<SocketAddress, Map<String, String>>> f = syncExecutor.submit( new GetstatsCallable( memClient ) );
-            return f;
-        }
+        public void submitQuery( MemcachedClient memClient, final Message<JsonObject> message, final Context ctx ) throws Exception {
 
-        @Override
-        public JsonObject buildResponse( Message<JsonObject> message, Future future, boolean shouldReply ) throws Exception {
-            checkTimeout( future );
-            Map<SocketAddress, Map<String, String>> stats = ( Map<SocketAddress, Map<String, String>> ) future.get();
+            Map<SocketAddress, Map<String, String>> stats = memClient.getStats();
             JsonObject response = new JsonObject();
-            JsonObject data = new JsonObject();
             for ( SocketAddress sa : stats.keySet() ) {
                 JsonObject s = new JsonObject();
-                data.putObject( "server", s );
+                response.putObject( "server", s );
                 s.putString( "address", ( ( InetSocketAddress ) sa ).getHostString() + ":" + ( ( InetSocketAddress ) sa ).getPort() );
                 Map<String, String> info = stats.get( sa );
                 for ( String i : info.keySet() ) {
                     s.putString( i, info.get( i ) );
                 }
             }
-            response.putObject( "data", data );
-            response.putBoolean( "success", true );
-            return response;
+            sendOk( message, response );
+        }
+
+        @Override
+        public void reply( Message<JsonObject> message, AbstractListenableFuture future, OperationStatus status ) {
+            // this is a sync call
         }
     },
     INCR() {
         @Override
-        public Future query( MemcachedClient memClient, Message<JsonObject> message ) throws Exception {
+        public void submitQuery( MemcachedClient memClient, final Message<JsonObject> message, final Context ctx ) throws Exception {
+
             String key = getKey( message );
-            Long by = message.body().getLong( "by" );
-            if ( by == null ) {
-                throw new Exception( "missing mandatory non-empty field 'by'" );
-            }
-            OperationFuture<Long> operationFuture = memClient.asyncIncr( key, by );
-            return operationFuture;
+            long by = message.body().getLong( "by" ) == null ? 0 : message.body().getLong( "by" );
+
+            memClient.asyncIncr( key, by ).addListener( new OperationCompletionListener() {
+
+                @Override
+                public void onComplete( final OperationFuture<?> f ) throws Exception {
+
+                    ctx.runOnContext( new Handler<Void>() {
+
+                        @Override
+                        public void handle( Void v ) {
+
+                            reply( message, f, f.getStatus() );
+                        }
+                    } );
+                }
+            } );
         }
 
         @Override
-        public JsonObject buildResponse( Message<JsonObject> message, Future future, boolean shouldReply ) throws Exception {
-            if ( !shouldReply ) {
-                return null;
+        public void reply( Message<JsonObject> message, AbstractListenableFuture future, OperationStatus status ) {
+
+            try {
+                checkTimeOut( message, future, status );
+                sendOk( message, null );
             }
-            checkTimeout( future );
-            JsonObject response = new JsonObject();
-            JsonObject data = new JsonObject();
-            response.putObject( "data", data );
-            Long incr_val = ( Long ) future.get();
-            if ( incr_val != null ) {
-                response.putBoolean( "success", true );
-                data.putNumber( "value", incr_val );
+            catch ( Exception e ) {
+                sendError( message, e.getMessage() );
             }
-            else {
-                response.putBoolean( "success", false );
-                response.putString( "reason", "failed to fetch key '" + getKey( message ) + "'" );
-            }
-            return response;
         }
     },
     DECR() {
         @Override
-        public Future query( MemcachedClient memClient, Message<JsonObject> message ) throws Exception {
+        public void submitQuery( MemcachedClient memClient, final Message<JsonObject> message, final Context ctx ) throws Exception {
+
             String key = getKey( message );
-            Long by = message.body().getLong( "by" );
-            if ( by == null ) {
-                throw new Exception( "missing mandatory non-empty field 'by'" );
-            }
-            OperationFuture<Long> operationFuture = memClient.asyncDecr( key, by );
-            return operationFuture;
+            long by = message.body().getLong( "by" ) == null ? 0 : message.body().getLong( "by" );
+
+            memClient.asyncDecr( key, by ).addListener( new OperationCompletionListener() {
+
+                @Override
+                public void onComplete( final OperationFuture<?> f ) throws Exception {
+
+                    ctx.runOnContext( new Handler<Void>() {
+
+                        @Override
+                        public void handle( Void v ) {
+
+                            reply( message, f, f.getStatus() );
+                        }
+                    } );
+                }
+            } );
         }
 
         @Override
-        public JsonObject buildResponse( Message<JsonObject> message, Future future, boolean shouldReply ) throws Exception {
-            if ( !shouldReply ) {
-                return null;
+        public void reply( Message<JsonObject> message, AbstractListenableFuture future, OperationStatus status ) {
+
+            try {
+                checkTimeOut( message, future, status );
+                sendOk( message, null );
             }
-            checkTimeout( future );
-            JsonObject response = new JsonObject();
-            JsonObject data = new JsonObject();
-            response.putObject( "data", data );
-            Long decr_val = ( Long ) future.get();
-            if ( decr_val != null ) {
-                response.putBoolean( "success", true );
-                data.putNumber( "value", decr_val );
+            catch ( Exception e ) {
+                sendError( message, e.getMessage() );
             }
-            else {
-                response.putBoolean( "success", false );
-                response.putString( "reason", "failed to fetch key '" + getKey( message ) + "'" );
-            }
-            return response;
         }
     },
     DELETE() {
         @Override
-        public Future query( MemcachedClient memClient, Message<JsonObject> message ) throws Exception {
+        public void submitQuery( MemcachedClient memClient, final Message<JsonObject> message, final Context ctx ) throws Exception {
+
             String key = getKey( message );
-            OperationFuture<Boolean> operationFuture = memClient.delete( key );
-            return operationFuture;
+            memClient.delete( key ).addListener( new OperationCompletionListener() {
+
+                @Override
+                public void onComplete( final OperationFuture<?> f ) throws Exception {
+
+                    ctx.runOnContext( new Handler<Void>() {
+
+                        @Override
+                        public void handle( Void v ) {
+
+                            reply( message, f, f.getStatus() );
+                        }
+                    } );
+                }
+            } );
         }
 
         @Override
-        public JsonObject buildResponse( Message<JsonObject> message, Future future, boolean shouldReply ) throws Exception {
-            if ( !shouldReply ) {
-                return null;
+        public void reply( Message<JsonObject> message, AbstractListenableFuture future, OperationStatus status ) {
+
+            try {
+                checkTimeOut( message, future, status );
+                sendOk( message, null );
             }
-            checkTimeout( future );
-            JsonObject response = new JsonObject();
-            JsonObject data = new JsonObject();
-            response.putObject( "data", data );
-            boolean success = ( Boolean ) future.get();
-            response.putBoolean( "success", success );
-            if ( !success ) {
-                response.putString( "reason", "failed to fetch key '" + getKey( message ) + "'" );
+            catch ( Exception e ) {
+                sendError( message, e.getMessage() );
             }
-            return response;
         }
     },
     FLUSH() {
         @Override
-        public Future query( MemcachedClient memClient, Message<JsonObject> message ) throws Exception {
+        public void submitQuery( MemcachedClient memClient, final Message<JsonObject> message, final Context ctx ) throws Exception {
+
             int delay = message.body().getInteger( "delay" ) == null ? 0 : message.body().getInteger( "delay" );
-            OperationFuture<Boolean> operationFuture = memClient.flush( delay );
-            return operationFuture;
+            memClient.flush( delay ).addListener( new OperationCompletionListener() {
+
+                @Override
+                public void onComplete( final OperationFuture<?> f ) throws Exception {
+
+                    ctx.runOnContext( new Handler<Void>() {
+
+                        @Override
+                        public void handle( Void v ) {
+
+                            reply( message, f, f.getStatus() );
+                        }
+                    } );
+                }
+            } );
         }
 
         @Override
-        public JsonObject buildResponse( Message<JsonObject> message, Future future, boolean shouldReply ) throws Exception {
-            if ( !shouldReply ) {
-                return null;
+        public void reply( Message<JsonObject> message, AbstractListenableFuture future, OperationStatus status ) {
+
+            try {
+                checkTimeOut( message, future, status );
+                sendOk( message, null );
             }
-            checkTimeout( future );
-            JsonObject response = new JsonObject();
-            JsonObject data = new JsonObject();
-            response.putObject( "data", data );
-            boolean success = ( Boolean ) future.get();
-            response.putBoolean( "success", success );
-            return response;
+            catch ( Exception e ) {
+                sendError( message, e.getMessage() );
+            }
         }
     };
 
@@ -434,9 +556,13 @@ public enum MemCommand {
         return s == null ? "" : s;
     }
 
-    private static void checkTimeout( Future f ) throws TimeoutException {
-        if ( f == null ) {
-            throw new TimeoutException();
+    private static void checkTimeOut( Message<JsonObject> message, AbstractListenableFuture future, OperationStatus status ) throws Exception {
+
+        if ( future == null || !future.isDone() ) {
+            throw new Exception( "operation time out" );
+        }
+        if ( status == null || !status.isSuccess() ) {
+            throw new Exception( status == null ? "system error" : status.getMessage() );
         }
     }
 
@@ -450,12 +576,14 @@ public enum MemCommand {
 
     private static JsonObject parseForJson( JsonObject jsonObject, String key, Object value ) throws Exception {
         if ( value != null ) {
-            // not serializable in current version of vert.x
-            /*
-            * if(value instanceof JsonArray) jsonObject.putArray("value", (JsonArray) value); else if(value instanceof JsonObject) jsonObject.putObject("value", (JsonObject) value); else
-            */
 
-            if ( value instanceof byte[] ) {
+            if ( value instanceof JsonArray ) {
+                jsonObject.putArray( key, ( JsonArray ) value );
+            }
+            else if ( value instanceof JsonObject ) {
+                jsonObject.putObject( key, ( JsonObject ) value );
+            }
+            else if ( value instanceof byte[] ) {
                 jsonObject.putBinary( key, ( byte[] ) value );
             }
             else if ( value instanceof Boolean ) {
@@ -474,10 +602,24 @@ public enum MemCommand {
         return jsonObject;
     }
 
-    private static ExecutorService syncExecutor = Executors.newFixedThreadPool( 2 );
+    public static void sendError( Message<JsonObject> message, String errMsg ) {
+        JsonObject reply = new JsonObject();
+        reply.putString( "command", message.body().getString( "command" ) );
+        reply.putString( "status", "error" );
+        reply.putString( "message", errMsg );
+        message.reply( reply );
+    }
 
-    //no default implementation
-    public abstract Future query( MemcachedClient memClient, Message<JsonObject> message ) throws Exception;
+    public static void sendOk( Message<JsonObject> message, JsonObject response ) {
+        JsonObject reply = new JsonObject();
+        reply.putString( "command", message.body().getString( "command" ) );
+        reply.putString( "status", "ok" );
+        reply.putObject( "response", response );
+        message.reply( reply );
+    }
 
-    public abstract JsonObject buildResponse( Message<JsonObject> message, Future future, boolean shouldReply ) throws Exception;
+    public abstract void submitQuery( MemcachedClient memClient, Message<JsonObject> message, Context ctx ) throws Exception;
+
+    public abstract void reply( Message<JsonObject> message, AbstractListenableFuture future, OperationStatus status ) throws Exception;
+
 }

@@ -19,11 +19,9 @@ public class MemClientTest extends Verticle {
         address = "vertx.memcached";
 
         JsonObject config = new JsonObject();
-        config.putString( "address", "vertx.memcached" );
         config.putString( "address", address );
         config.putString( "memcached.servers", "localhost:11211" );
         config.putNumber( "memcached.timeout.ms", 1000 );
-        config.putNumber( "memcached.tasks.check.ms", 10 );
         config.putNumber( "memcached.connections", 2 );
 
         container.deployVerticle( "net.atarno.vertx.memcached.client.MemClient", config, 1, new Handler<AsyncResult<String>>() {
@@ -31,10 +29,8 @@ public class MemClientTest extends Verticle {
             public void handle( AsyncResult<String> stringAsyncResult ) {
                 HashMap<String, Object> cacheCall = new HashMap<String, Object>();
 
-                cacheCall.put( "shouldReply", true );
-                cacheCall.put( "command", "set" );
-                cacheCall.put( "key", "CCC" );
-                cacheCall.put( "value", 100 );
+                cacheCall.put( "command", "getbulk" );
+                cacheCall.put("keys", new JsonArray().addString(  "AAA").addString("BBB").addString("CCC"));
                 /*
                 build any other command here
                  */
@@ -72,14 +68,14 @@ public class MemClientTest extends Verticle {
                 }
             }
         }
-        System.out.println( "sent: \n" + notif.encode() );
+        System.out.println( "sent: \n" + notif.encodePrettily() );
         push( notif );
     }
 
     private void push( JsonObject notif ) {
         Handler<Message<JsonObject>> replyHandler = new Handler<Message<JsonObject>>() {
             public void handle( Message<JsonObject> message ) {
-                System.out.println( "received: \n" + message.body().encode() );
+                System.out.println( "received: \n" + message.body().encodePrettily() );
             }
         };
         vertx.eventBus().send( address, notif, replyHandler );
