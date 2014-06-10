@@ -32,6 +32,9 @@ Here is an example of`vertx-memcached` worker configuration:
 where
 
 - `address` - the eventbus address of mod's verticles . Mandatory.
+
+- `validate-on-connect` - if set to true, an attempt to call memcached GETSTATS will be done on spymemcached client init, this to check if memcached servers are available. Optional, default to false.
+
 - `memcached.servers` - the address of your memcached server(s). 1 to n space separated addresses can be passed, each of these should be in the following format: `<hostname:port>`. Mandatory.
 
 - `memcached.connections` - the number of spymemcached clients that will be initialized on verticle start up. These clients will be used randomly, in a way that mimics a connection pool behavior. Since spymemcached client is async and non-blocking, there is no need to use a lot of clients in such pool. Optional, default - 2.
