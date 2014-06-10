@@ -12,7 +12,8 @@ import org.vertx.java.core.json.JsonObject;
 import org.vertx.java.core.logging.Logger;
 import org.vertx.java.platform.Verticle;
 
-import java.io.IOException;
+import java.net.SocketAddress;
+import java.util.Map;
 
 /**
  * spymemcached client for vert.x<p>
@@ -26,6 +27,7 @@ public class MemClient extends Verticle {
     private String address;
     private String memServers;
     private long timeOutMillis;
+    private boolean validateConnection;
 
     private EventBus eb;
     private Logger logger;
@@ -36,25 +38,24 @@ public class MemClient extends Verticle {
         eb = vertx.eventBus();
         logger = container.logger();
         address = container.config().getString( "address", "vertx.memcached" );
+        validateConnection = container.config().getBoolean( "validate-on-connect", false );
         memServers = container.config().getString( "memcached.servers" );
         timeOutMillis = container.config().getLong( "memcached.timeout.ms", BinaryConnectionFactory.DEFAULT_OPERATION_TIMEOUT ).longValue();
         int connections = container.config().getNumber( "memcached.connections", 1 ).intValue();
         // init connection pool
         try {
             initMemClients( connections );
+            // register verticle
+            eb.registerHandler( address, memHandler, new AsyncResultHandler<Void>() {
+                @Override
+                public void handle( AsyncResult<Void> voidAsyncResult ) {
+                    logger.info( this.getClass().getSimpleName() + " verticle is started" );
+                }
+            } );
         }
-        catch ( IOException e ) {
+        catch ( Exception e ) {
             logger.error( e );
-            return;
         }
-
-        // register verticle
-        eb.registerHandler( address, memHandler, new AsyncResultHandler<Void>() {
-            @Override
-            public void handle( AsyncResult<Void> voidAsyncResult ) {
-                logger.info( this.getClass().getSimpleName() + " verticle is started" );
-            }
-        } );
     }
 
     Handler<Message<JsonObject>> memHandler = new Handler<Message<JsonObject>>() {
@@ -79,20 +80,44 @@ public class MemClient extends Verticle {
     };
 
 
-    private void initMemClients( int connections ) throws IOException {
+    private void initMemClients( int connections ) throws Exception {
+        boolean canConnect = true;
         memClients = new MemcachedClient[ connections < 1 ? 1 : connections ];
         for ( int i = 0; i < memClients.length; i++ ) {
             BinaryConnectionFactoryTO bf = new BinaryConnectionFactoryTO( timeOutMillis );
             memClients[ i ] = new MemcachedClient( bf, AddrUtil.getAddresses( memServers ) );
         }
-        logger.info( "pool of " + memClients.length + " memcached clients was successfully initialized" );
+        Map<SocketAddress, Map<String, String>> stats = null;
+        if ( validateConnection ) {
+            try {
+                MemcachedClient _c = getMemClient();
+                stats = _c.getStats();
+            }
+            catch ( Exception e ) {
+                canConnect = false;
+            }
+            if ( canConnect ) {
+                canConnect = false;
+                for ( Map<String, String> _s : stats.values() ) {
+                    if ( _s != null && !_s.isEmpty() ) {
+                        canConnect = true;
+                        break;
+                    }
+                }
+            }
+        }
+        if ( canConnect ) {
+            logger.info( "pool of " + memClients.length + " memcached clients was successfully initialized" );
+        }
+        else {
+            throw new Exception( "memcached servers at " + address + " are unavailable" );
+        }
     }
 
     private MemcachedClient getMemClient() {
-        if ( memClients.length == 1 ) {
-            return memClients[ 0 ];
-        }
-        return memClients[ ( int ) ( Math.random() * memClients.length ) ];
+
+        MemcachedClient mc = memClients[ ( int ) ( Math.random() * memClients.length ) ];
+        return mc;
     }
 
     private MemCommand getByName( String name ) {
@@ -103,7 +128,9 @@ public class MemClient extends Verticle {
     public void stop() {
 
         for ( int i = 0; i < memClients.length; i++ ) {
-            memClients[ i ].shutdown();
+            if ( memClients[ i ] != null ) {
+                memClients[ i ].shutdown();
+            }
         }
         logger.info( "== Memcached clients were closed successfully" );
     }

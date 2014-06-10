@@ -4,6 +4,7 @@ import org.vertx.java.core.AsyncResult;
 import org.vertx.java.core.Handler;
 import org.vertx.java.core.eventbus.EventBus;
 import org.vertx.java.core.eventbus.Message;
+import org.vertx.java.core.eventbus.ReplyException;
 import org.vertx.java.core.json.JsonArray;
 import org.vertx.java.core.json.JsonObject;
 import org.vertx.java.platform.Verticle;
@@ -23,6 +24,7 @@ public class MemClientTest extends Verticle {
         config.putString( "memcached.servers", "localhost:11211" );
         config.putNumber( "memcached.timeout.ms", 1000 );
         config.putNumber( "memcached.connections", 2 );
+        config.putBoolean( "validate-on-connect", true );
 
         container.deployVerticle( "net.atarno.vertx.memcached.client.MemClient", config, 1, new Handler<AsyncResult<String>>() {
             @Override
@@ -30,7 +32,7 @@ public class MemClientTest extends Verticle {
                 HashMap<String, Object> cacheCall = new HashMap<String, Object>();
 
                 cacheCall.put( "command", "getbulk" );
-                cacheCall.put("keys", new JsonArray().addString(  "AAA").addString("BBB").addString("CCC"));
+                cacheCall.put( "keys", new JsonArray().addString( "AAA" ).addString( "BBB" ).addString( "CCC" ) );
                 /*
                 build any other command here
                  */
@@ -73,11 +75,16 @@ public class MemClientTest extends Verticle {
     }
 
     private void push( JsonObject notif ) {
-        Handler<Message<JsonObject>> replyHandler = new Handler<Message<JsonObject>>() {
-            public void handle( Message<JsonObject> message ) {
-                System.out.println( "received: \n" + message.body().encodePrettily() );
+        Handler<AsyncResult<Message<JsonObject>>> replyHandler = new Handler<AsyncResult<Message<JsonObject>>>() {
+            public void handle( AsyncResult<Message<JsonObject>> result ) {
+                if ( result.succeeded() ) {
+                    System.out.println( "received: \n" + result.result().body().encodePrettily() );
+                }
+                else {
+                    System.out.println( "time out " + ( ( ReplyException ) result.cause() ).failureType().name() );
+                }
             }
         };
-        vertx.eventBus().send( address, notif, replyHandler );
+        vertx.eventBus().sendWithTimeout( address, notif, 1500L, replyHandler );
     }
 }
